@@ -3,13 +3,8 @@ const express = require('express');
 const request = require('request-promise-native');
 const NodeCache = require('node-cache');
 const session = require('express-session');
-const bodyParser=require("body-parser");
 const opn = require('open');
-
 const app = express();
-
-app.use(bodyParser.urlencoded({extended: true}));
-app.use(express.static("public"));
 
 const PORT = 3000;
 
@@ -20,6 +15,16 @@ if (!process.env.CLIENT_ID || !process.env.CLIENT_SECRET) {
     throw new Error('Missing CLIENT_ID or CLIENT_SECRET environment variable.')
 }
 
+//===========================================================================//
+//  HUBSPOT APP CONFIGURATION
+//
+//  All the following values must match configuration settings in your app.
+//  They will be used to build the OAuth URL, which users visit to begin
+//  installing. If they don't match your app's configuration, users will
+//  see an error page.
+
+// Replace the following with the values from your app auth config, 
+// or set them as environment variables before running.
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 
@@ -33,6 +38,7 @@ if (process.env.SCOPE) {
 // On successful install, users will be redirected to /oauth-callback
 const REDIRECT_URI = `http://localhost:${PORT}/oauth-callback`;
 
+//===========================================================================//
 
 // Use a session to keep track of client ID
 app.use(session({
@@ -41,14 +47,14 @@ app.use(session({
   saveUninitialized: true
 }));
  
+//================================//
 //   Running the OAuth 2.0 Flow   //
-
+//================================//
 
 // Step 1
 // Build the authorization URL to redirect a user
 // to when they choose to install the app
-const authUrl =
-'https://app.hubspot.com/oauth/authorize?client_id=ce77238e-de32-4451-901f-2cd81832f10c&redirect_uri=http://localhost:3000/oauth-callback&scope=crm.objects.contacts.read';
+const authUrl ='https://app.hubspot.com/oauth/authorize?client_id=ce77238e-de32-4451-901f-2cd81832f10c&redirect_uri=http://localhost:3000/oauth-callback&scope=crm.objects.contacts.read%20crm.objects.contacts.write'
 // Redirect the user from the installation page to
 // the authorization URL
 app.get('/install', (req, res) => {
@@ -98,8 +104,9 @@ app.get('/oauth-callback', async (req, res) => {
   }
 });
 
-
-//  Exchanging Proof for an Access Token   //
+//==========================================//
+//   Exchanging Proof for an Access Token   //
+//==========================================//
 
 const exchangeForTokens = async (userId, exchangeProof) => {
   try {
@@ -112,7 +119,7 @@ const exchangeForTokens = async (userId, exchangeProof) => {
     refreshTokenStore[userId] = tokens.refresh_token;
     accessTokenCache.set(userId, tokens.access_token, Math.round(tokens.expires_in * 0.75));
 
-    console.log('> Received an access token and refresh token');
+    console.log('       > Received an access token and refresh token');
     return tokens.access_token;
   } catch (e) {
     console.error(`       > Error exchanging ${exchangeProof.grant_type} for access token`);
@@ -141,12 +148,15 @@ const getAccessToken = async (userId) => {
   return accessTokenCache.get(userId);
 };
 
+
+
 const isAuthorized = (userId) => {
   return refreshTokenStore[userId] ? true : false;
 };
 
-
+//====================================================//
 //   Using an Access Token to Query the HubSpot API   //
+//====================================================//
 
 
 const createContact=async(accessToken,data)=>{
@@ -173,45 +183,20 @@ request(options, function (error, response, body) {
 });
 }
 
-//----------------------------------UPDATE PART---------------------//
-const updateContact=async(accessToken,data)=>{
-  const headers = {
-    Authorization: `Bearer ${accessToken}`,
-    'Content-Type': 'application/json'
-  };
 
-var options = { method: 'POST',
-  url: 'https://api.hubapi.com/contacts/v1/contact/vid/11845824/profile',
-  headers: headers,
-  body: 
-   { properties: 
-      [ { property: 'email', value: data.eMail },
-        { property: 'firstname', value:data.firstName },
-        { property: 'lastname', value: data.lastName },
-     ] },
-  json: true };
 
-request(options, function (error, response, body) {
-  if (error) throw new Error(error);
-
-  console.log(body);
-});
-}
-//----------------
 
 const getContact = async (accessToken) => {
   console.log('');
-  console.log('Retrieving a contact from HubSpot using the access token');
+  console.log('=== Retrieving a contact from HubSpot using the access token ===');
   try {
     const headers = {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json'
     };
     console.log('===> Replace the following request.get() to test other API calls');
-     console.log('===> request.get(\'https://api.hubapi.com/contacts/v1/lists/all/contacts/all\')');
-     const result = await request.get('https://api.hubapi.com/contacts/v1/lists/all/contacts/all', 
-    
-    {
+    console.log('===> request.get(\'https://api.hubapi.com/contacts/v1/lists/all/contacts/all\')');
+    const result = await request.get('https://api.hubapi.com/contacts/v1/lists/all/contacts/all', {
       headers: headers
     });
 
@@ -222,48 +207,42 @@ const getContact = async (accessToken) => {
   }
 };
 
+//========================================//
+//   Displaying information to the user   //
+//========================================//
 
-
-//Display the user informaton
 const displayContactName = (res, contacts) => {
-  if (contacts.status === 'error') {
-    res.write(`<p>Unable to retrieve contact! Error Message: ${contact.message}</p>`);
-    return;
-  }
-
-  console.log(contacts);
-
-  contacts.map(printContacts =(contact)=>{
-        const { firstname, lastname } = contact.properties;
-        res.write(`<p>Contact name: ${firstname.value} ${lastname.value}</p>`);
-  })
+   if (contacts.status === 'error') {
+     res.write(`<p>Unable to retrieve contact! Error Message: ${contacts.message}</p>`);
+     return;
+   }
+  console.log(contacts)
   
- 
-};
-
+  contacts.map(printContacts =(contact)=>{ 
+    const { firstname, lastname } = contact.properties;
+    res.write(`<p>Contact name: ${firstname.value} ${lastname.value}</p>`);
+   })
+  }
+  
 app.get('/', async (req, res) => {
   res.setHeader('Content-Type', 'text/html');
-  res.write(`<h2>My Hubspot App</h2>`);
+  res.write(`<h2>HubSpot OAuth 2.0 Quickstart App</h2>`);
   if (isAuthorized(req.sessionID)) {
     const accessToken = await getAccessToken(req.sessionID);
     const contact = await getContact(accessToken);
-   res.write(`<h4>Access token: ${accessToken}</h4>`);
+    res.write(`<h4>Access token: ${accessToken}</h4>`);
     displayContactName(res, contact);
-    res.write(`<a href="/"><h3>List of Contacts</h3></a>`)
-    res.write(`<a href="/createcontact"><h3>Create Contact</h3></a>`);
-    res.write(`<a href="/updatecontact"><h3>Update Contact</h3></a>`)
+    res.write(`<a href="/createcontact"><h3>Create Contact</h3></a>`)
   } else {
     res.write(`<a href="/install"><h3>Install the app</h3></a>`);
   }
   res.end();
 });
 
+
+
 app.get('/createcontact',async(req,res)=>{
   res.sendFile(__dirname+"/createcontact.html");
-})
-
-app.get('/updatecontact',async(req,res)=>{
-  res.sendFile(__dirname+"/updatecontact.html");
 })
 
 app.post('/createcontact',async(req,res)=>{
@@ -278,32 +257,12 @@ app.post('/createcontact',async(req,res)=>{
   res.redirect('/createcontact');
 })
 
-app.post('/updatecontact',async(req,res)=>{
-  console.log(req.body);
-  if (isAuthorized(req.sessionID)) {
-    const accessToken = await getAccessToken(req.sessionID);
-  updateContact(accessToken,req.body);
-} else {
-  res.write(`<a href="/install"><h3>Install the app</h3></a>`);
-}
-
-  res.redirect('/updatecontact');
-})
-
-
-
 app.get('/error', (req, res) => {
+  
   res.setHeader('Content-Type', 'text/html');
   res.write(`<h4>Error: ${req.query.msg}</h4>`);
   res.end();
 });
 
-
-
-
-
-
-
-app.listen(PORT, () => console.log(`App is Running on Server ${PORT} `));
+app.listen(PORT, () => console.log(`=== Starting your app on http://localhost:${PORT} ===`));
 opn(`http://localhost:${PORT}`);
-
